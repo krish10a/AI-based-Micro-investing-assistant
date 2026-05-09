@@ -10,18 +10,29 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from config.settings import settings
-from routes.api import router as api_router
-from routes.analytics import router as analytics_router
-from routes.goals import router as goals_router
-from routes.auth import router as auth_router
-from routes.system import router as system_router
-from routes.profile import router as profile_router
-from routes.transactions import router as transactions_router
-from routes.sips import router as sips_router
-from routes.portfolio import router as portfolio_router
-from routes.reports import router as reports_router
 from config.model_metadata import MODEL_INFO, AUDIT_LOGGER
 from services.recommendation_service import RecommendationService
+
+# Optional rate limiting
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    from rate_limit import limiter, rate_limit_exceeded_handler
+    RATE_LIMITING_AVAILABLE = True
+except ImportError:
+    RATE_LIMITING_AVAILABLE = False
+    limiter = None
+    rate_limit_exceeded_handler = None
+    RateLimitExceeded = None
+
+# Optional database
+try:
+    from database import init_db
+    DATABASE_AVAILABLE = True
+except ImportError:
+    DATABASE_AVAILABLE = False
+    init_db = None
 
 # Configure logging
 logging.basicConfig(
@@ -84,6 +95,18 @@ async def lifespan(app: FastAPI):
     logger.info("Micro-Investing Assistant API - Starting")
     logger.info("=" * 60)
 
+    # Initialize database
+    if DATABASE_AVAILABLE:
+        logger.info("Initializing database...")
+        try:
+            init_db()
+            logger.info("Database initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
+            raise
+    else:
+        logger.info("Database module not available, skipping database initialization")
+
     # Load ML artifacts
     logger.info("Loading ML artifacts...")
     try:
@@ -133,6 +156,13 @@ def create_app() -> FastAPI:
         version="2.0.0",
         lifespan=lifespan
     )
+
+    # Set up rate limiting
+    if RATE_LIMITING_AVAILABLE:
+        app.state.limiter = limiter
+        app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    else:
+        logger.warning("Rate limiting not available, skipping rate limit setup")
 
     # Middleware
     app.add_middleware(RequestLoggingMiddleware)

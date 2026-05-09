@@ -1,6 +1,6 @@
 """Pydantic schemas for financial goals management."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Literal
 from datetime import datetime
 
@@ -10,11 +10,28 @@ class GoalBase(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=100, description="Goal name")
     target_amount: float = Field(..., gt=0, description="Target amount in rupees")
-    timeline_months: int = Field(..., gt=0, le=600, description="Timeline in months (1-600)")
+    timeline_months: int = Field(..., gt=0, le=1200, description="Timeline in months (1-1200)")
     priority: Literal["low", "medium", "high", "critical"] = Field(
         default="medium", description="Goal priority"
     )
     description: Optional[str] = Field(None, max_length=500, description="Goal description")
+
+    @field_validator('name')
+    @classmethod
+    def sanitize_name(cls, v: str) -> str:
+        """Sanitize goal name to prevent XSS."""
+        # Remove any HTML tags
+        import re
+        return re.sub(r'<[^>]*>', '', v).strip()
+
+    @field_validator('description')
+    @classmethod
+    def sanitize_description(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize description to prevent XSS."""
+        if v is None:
+            return None
+        import re
+        return re.sub(r'<[^>]*>', '', v).strip()
 
 
 class GoalCreate(GoalBase):
@@ -28,10 +45,28 @@ class GoalUpdate(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     target_amount: Optional[float] = Field(None, gt=0)
-    timeline_months: Optional[int] = Field(None, gt=0, le=600)
+    timeline_months: Optional[int] = Field(None, gt=0, le=1200)
     priority: Optional[Literal["low", "medium", "high", "critical"]] = None
     description: Optional[str] = Field(None, max_length=500)
     achieved: Optional[bool] = None
+
+    @field_validator('name')
+    @classmethod
+    def sanitize_name(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize goal name to prevent XSS."""
+        if v is None:
+            return None
+        import re
+        return re.sub(r'<[^>]*>', '', v).strip()
+
+    @field_validator('description')
+    @classmethod
+    def sanitize_description(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize description to prevent XSS."""
+        if v is None:
+            return None
+        import re
+        return re.sub(r'<[^>]*>', '', v).strip()
 
 
 class GoalResponse(GoalBase):
@@ -59,8 +94,3 @@ class GoalsListResponse(BaseModel):
     total_target_amount: float
     total_current_amount: float
     overall_completion: float
-
-
-# In-memory storage for goals (replace with database in production)
-goals_storage: dict[str, GoalResponse] = {}
-goal_counter = 0

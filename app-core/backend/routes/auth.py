@@ -1,12 +1,25 @@
-"""API routes for authentication and onboarding."""
+"""Authentication routes for user registration and login."""
 
 import logging
 import secrets
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field, EmailStr
 from typing import Optional, Dict, Any
+
+from database import get_db
+from auth import (
+    verify_password,
+    get_password_hash,
+    create_access_token,
+    decode_access_token,
+    get_current_active_user
+)
+from models.db_models import User
+from config.settings import settings
 from services.recommendation_service import RecommendationService
 
 logger = logging.getLogger(__name__)
@@ -30,16 +43,44 @@ except ImportError:
 # =============================================================================
 
 
+class UserRegister(BaseModel):
+    """Request model for user registration."""
+    email: EmailStr = Field(..., description="User email address")
+    password: str = Field(..., min_length=8, description="User password (min 8 characters)")
+    full_name: str = Field(..., min_length=1, max_length=100, description="User full name")
+
+
+class UserLogin(BaseModel):
+    """Request model for user login."""
+    email: EmailStr = Field(..., description="User email address")
+    password: str = Field(..., description="User password")
+
+
+class TokenResponse(BaseModel):
+    """Response model for authentication token."""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: dict
+
+
+class UserResponse(BaseModel):
+    """Response model for user data."""
+    id: str
+    email: str
+    full_name: str | None
+    is_active: bool
+    created_at: str
+
+
 class LoginRequest(BaseModel):
     """Login request model."""
-
     email: str = Field(..., pattern=r"^[\w\.-]+@[\w\.-]+\.\w+$", description="User email")
     password: str = Field(..., min_length=6, description="User password")
 
 
 class LoginResponse(BaseModel):
     """Login response model."""
-
     success: bool
     access_token: Optional[str] = None
     token_type: str = "bearer"
@@ -50,7 +91,6 @@ class LoginResponse(BaseModel):
 
 class BiometricRequest(BaseModel):
     """Biometric authentication request."""
-
     credential_id: str = Field(..., description="WebAuthn credential ID")
     client_data_json: str = Field(..., description="Client data JSON")
     authenticator_data: str = Field(..., description="Authenticator data")
@@ -59,7 +99,6 @@ class BiometricRequest(BaseModel):
 
 class BiometricResponse(BaseModel):
     """Biometric authentication response."""
-
     success: bool
     access_token: Optional[str] = None
     message: str
@@ -126,7 +165,6 @@ class OnboardResponse(BaseModel):
 
 class VerifyIdentityRequest(BaseModel):
     """Identity verification request."""
-
     document_type: str = Field(..., description="Aadhaar/PAN/Passport")
     document_number: str = Field(..., max_length=50)
     phone: str = Field(..., min_length=10)
@@ -135,7 +173,6 @@ class VerifyIdentityRequest(BaseModel):
 
 class VerifyIdentityResponse(BaseModel):
     """Identity verification response."""
-
     success: bool
     verification_token: Optional[str] = None
     message: str
@@ -143,7 +180,7 @@ class VerifyIdentityResponse(BaseModel):
 
 
 # =============================================================================
-# Mock Authentication Storage
+# Mock Authentication Storage (for backward compatibility)
 # =============================================================================
 
 # In-memory storage for demo (replace with database in production)
@@ -162,11 +199,126 @@ def _generate_access_token(user_id: str) -> str:
 # =============================================================================
 
 
-@router.post("/auth/login", response_model=LoginResponse)
-async def login(login_data: LoginRequest):
+@router.post("/auth/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     """
-    Authenticate user with email and password.
+    Register a new user.
 
+    Args:
+        email: User email address
+        password: User password (min 8 characters)
+        full_name: User full name
+
+    Returns:
+        Created user data
+    """
+    try:
+        # Check if user already exists
+        existing_user = db.query(User).filter(User.email == user_data.email).first()
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered"
+            )
+
+        # Create new user
+        import uuid
+        user = User(
+            id=str(uuid.uuid4()),
+            email=user_data.email,
+            hashed_password=get_password_hash(user_data.password),
+            full_name=user_data.full_name,
+            is_active=True
+        )
+
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        logger.info(f"User registered: {user.email}")
+
+        return {
+            "id": user.id,
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_active": user.is_active,
+            "created_at": user.created_at.isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Registration failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration failed. Please try again."
+        )
+
+
+@router.post("/auth/login", response_model=TokenResponse)
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """
+    Authenticate user and return access token.
+
+    Args:
+        username: User email address
+        password: User password
+
+    Returns:
+        Access token and user data
+    """
+    try:
+        # Find user by email
+        user = db.query(User).filter(User.email == form_data.username).first()
+
+        if not user or not verify_password(form_data.password, user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is inactive"
+            )
+
+        # Create access token
+        access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+        access_token = create_access_token(
+            data={"sub": user.id, "email": user.email},
+            expires_delta=access_token_expires
+        )
+
+        logger.info(f"User logged in: {user.email}")
+
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": settings.access_token_expire_minutes * 60,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "full_name": user.full_name,
+                "is_active": user.is_active
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Login failed. Please try again."
+        )
+
+
+@router.post("/auth/login", response_model=LoginResponse)
+async def login_legacy(login_data: LoginRequest):
+    """
+    Legacy login endpoint for backward compatibility.
+
+    Authenticate user with email and password.
     Returns a JWT-like access token valid for 1 hour.
     """
     try:
@@ -200,6 +352,119 @@ async def login(login_data: LoginRequest):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication failed",
+        )
+
+
+@router.get("/auth/me", response_model=UserResponse)
+async def get_current_user_info(current_user: User = Depends(get_current_active_user)):
+    """
+    Get current user information.
+
+    Returns:
+        Current user data
+    """
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "is_active": current_user.is_active,
+        "created_at": current_user.created_at.isoformat()
+    }
+
+
+@router.get("/auth/me")
+async def get_current_user_legacy(access_token: str):
+    """
+    Legacy get current user endpoint for backward compatibility.
+
+    Get current user profile from access token.
+    In production, decode JWT and fetch user from database.
+    """
+    try:
+        # Mock: extract user_id from token
+        if not access_token or not access_token.startswith("user_"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+            )
+
+        user_id = access_token.split(":")[0] if ":" in access_token else access_token
+
+        # Find user by ID (simplified for demo)
+        for email, user in users_db.items():
+            if user.get("user_id") == user_id:
+                return {
+                    "user_id": user["user_id"],
+                    "email": user["email"],
+                    "first_name": user.get("first_name"),
+                    "last_name": user.get("last_name"),
+                    "kyc_verified": user.get("kyc_verified", False),
+                    "segment": user.get("segment"),
+                }
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get current user failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not fetch user profile",
+        )
+
+
+@router.post("/auth/logout")
+async def logout():
+    """
+    Logout current user.
+
+    Note: This is a no-op on the server. The client should remove the token.
+    """
+    try:
+        logger.info("User logged out")
+        return {"success": True, "message": "Logged out successfully"}
+    except Exception as e:
+        logger.error(f"Logout failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Logout failed"
+        )
+
+
+@router.post("/auth/refresh", response_model=TokenResponse)
+async def refresh_token(current_user: User = Depends(get_current_active_user)):
+    """
+    Refresh access token.
+
+    Returns:
+        New access token
+    """
+    try:
+        access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+        access_token = create_access_token(
+            data={"sub": current_user.id, "email": current_user.email},
+            expires_delta=access_token_expires
+        )
+
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": settings.access_token_expire_minutes * 60,
+            "user": {
+                "id": current_user.id,
+                "email": current_user.email,
+                "full_name": current_user.full_name,
+                "is_active": current_user.is_active
+            }
+        }
+    except Exception as e:
+        logger.error(f"Token refresh failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Token refresh failed. Please login again."
         )
 
 
@@ -412,66 +677,4 @@ ALERTS:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Onboarding failed. Please try again.",
-        )
-
-
-@router.get("/auth/me")
-async def get_current_user(access_token: str):
-    """
-    Get current user profile from access token.
-
-    In production, decode JWT and fetch user from database.
-    """
-    try:
-        # Mock: extract user_id from token
-        if not access_token or not access_token.startswith("user_"):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token",
-            )
-
-        user_id = access_token.split(":")[0] if ":" in access_token else access_token
-
-        # Find user by ID (simplified for demo)
-        for email, user in users_db.items():
-            if user.get("user_id") == user_id:
-                return {
-                    "user_id": user["user_id"],
-                    "email": user["email"],
-                    "first_name": user.get("first_name"),
-                    "last_name": user.get("last_name"),
-                    "kyc_verified": user.get("kyc_verified", False),
-                    "segment": user.get("segment"),
-                }
-
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Get current user failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not fetch user profile",
-        )
-
-
-@router.post("/auth/logout")
-async def logout():
-    """
-    Logout user and invalidate session.
-
-    In production, this would invalidate the JWT token in a token store.
-    For demo purposes, it just returns success.
-    """
-    try:
-        logger.info("User logged out")
-        return {"success": True, "message": "Logged out successfully"}
-    except Exception as e:
-        logger.error(f"Logout failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Logout failed"
         )

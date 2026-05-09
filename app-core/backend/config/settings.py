@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
 
+    # Database
+    database_url: str = Field(default="sqlite:///./micro_invest.db")
+    debug: bool = Field(default=True)
+
     # ML Artifacts
     artifacts_dir: str = Field(default="./artifacts")
 
@@ -24,6 +28,15 @@ class Settings(BaseSettings):
     nim_temperature: float = Field(default=0.7)  # Match working NIM config
     nim_top_p: float = Field(default=0.9)        # Match working NIM config
     nim_max_tokens: int = Field(default=512)     # Reduced for faster response
+
+    # Security
+    secret_key: str = Field(default="your-secret-key-change-in-production")
+    algorithm: str = Field(default="HS256")
+    access_token_expire_minutes: int = Field(default=30)
+
+    # Rate Limiting
+    rate_limit_requests: int = Field(default=100)
+    rate_limit_period: int = Field(default=60)  # seconds
 
     model_config = SettingsConfigDict(
         env_file=".env",
