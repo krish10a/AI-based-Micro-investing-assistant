@@ -1,0 +1,8 @@
+1. keep in mind tht we have to first complete the feature and the build part of the project and ui will be the last thing. 
+2. the ui ill be generating myself using the stitch by google labs and later when am satisfied by its generations then ill be explicitly commanding u to "wrap our project with stitch ui". then only u do for tht.
+3. u do not have to create false info and make sure to stop and think or ask me if u are stuck with any problem, rather than doing useless iterations.
+4. DO NOT GENERATE USELESS TEXT AND EXPLAINATIONS. I JUST NEED THE TASK DONE GRACEFULLY AND PERFECTLY. ILL EXPLICITLY ASK U IF I NEED EXPLAINATIONS FOR ANY THING.
+5. all the project related things and all the things should be only inside the app-core folder and only tht folder is gonna go to github whenever i say. 
+6. do not use github without me explicitly telling u to push to github.
+7. the code should be industry ready and shouldnt be bad. should be scalable.
+8. we have roughly created the ml part as u can see the ml_part.ipynb file. u can use code from tht for the original thing. but keep tht in mind tht tht file is successful and is working perfectly so our ml part is working in tht code.

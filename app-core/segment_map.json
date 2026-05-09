@@ -1,0 +1,20 @@
+{
+  "1": {
+    "name": "Financially Stressed",
+    "plan": "Debt Management & Stabilization",
+    "multiplier": 0.0,
+    "investment_appetite": "Zero (Build emergency fund)"
+  },
+  "2": {
+    "name": "Cautious Saver",
+    "plan": "Conservative SIP (Index/Liquid Funds)",
+    "multiplier": 0.2,
+    "investment_appetite": "Low-to-Medium"
+  },
+  "0": {
+    "name": "Investment Ready",
+    "plan": "Moderate-to-Aggressive SIP",
+    "multiplier": 0.4,
+    "investment_appetite": "High"
+  }
+}

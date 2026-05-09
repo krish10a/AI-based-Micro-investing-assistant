@@ -1,0 +1,54 @@
+[
+  {
+    "timestamp": "2026-05-09T11:04:41Z",
+    "request_id": "7859fc70-a057-4a73-b45c-4498bd29c747",
+    "event_type": "prediction",
+    "data": {
+      "user_input_hash": -4550434771859564093,
+      "features": [],
+      "cluster_id": -1,
+      "segment": "Wealth Accelerator",
+      "confidence": 0.814,
+      "guardrails_triggered": []
+    }
+  },
+  {
+    "timestamp": "2026-05-09T11:04:41Z",
+    "request_id": "0126f76d-e3e1-4a56-9426-dfd3993bba9e",
+    "event_type": "prediction",
+    "data": {
+      "user_input_hash": -4550434771859564093,
+      "features": [],
+      "cluster_id": -1,
+      "segment": "Wealth Accelerator",
+      "confidence": 0.814,
+      "guardrails_triggered": []
+    }
+  },
+  {
+    "timestamp": "2026-05-09T11:04:44Z",
+    "request_id": "a90e881e-5739-44e8-bcc1-c81c0af0301a",
+    "event_type": "prediction",
+    "data": {
+      "user_input_hash": -4550434771859564093,
+      "features": [],
+      "cluster_id": -1,
+      "segment": "Wealth Accelerator",
+      "confidence": 0.814,
+      "guardrails_triggered": []
+    }
+  },
+  {
+    "timestamp": "2026-05-09T11:04:44Z",
+    "request_id": "073c6da4-dbdf-437b-b21b-c2af7edfb4f2",
+    "event_type": "prediction",
+    "data": {
+      "user_input_hash": -4550434771859564093,
+      "features": [],
+      "cluster_id": -1,
+      "segment": "Wealth Accelerator",
+      "confidence": 0.814,
+      "guardrails_triggered": []
+    }
+  }
+]

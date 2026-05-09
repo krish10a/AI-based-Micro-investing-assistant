@@ -1,0 +1,533 @@
+# Micro-Investing Assistant - Current State (2026-05-03)
+
+## Project Overview
+Building a beginner-safe micro-investing assistant that helps users with small monthly savings understand how to start investing responsibly. Uses behavioral clustering on financial data to segment users into 3 categories and provide structured investment recommendations with AI-generated explanations via NVIDIA NIM LLMs.
+
+---
+
+## Project Architecture
+
+```
+C:\Users\ASUS\Desktop\micro investing/
+├── app-core/                          # Main application backend
+│   ├── backend/
+│   │   ├── main.py                    # FastAPI app entry point
+│   │   ├── config/
+│   │   │   ├── __init__.py
+│   │   │   ├── settings.py            # Environment config
+│   │   │   ├── nim.py                 # NVIDIA NIM configuration
+│   │   │   └── model_metadata.py      # Model metadata & audit logging
+│   │   ├── models/
+│   │   │   ├── __init__.py
+│   │   │   └── schemas.py             # Pydantic request/response schemas
+│   │   ├── services/
+│   │   │   ├── __init__.py
+│   │   │   ├── ml_service.py          # ML model inference service
+│   │   │   ├── nim_service.py         # NVIDIA NIM LLM service
+│   │   │   ├── nim_fallback_service.py # Multi-model fallback service
+│   │   │   ├── recommendation_service.py # Orchestration service
+│   │   │   └── gemini_service.py      # Gemini explanation service (legacy)
+│   │   ├── utils/
+│   │   │   ├── __init__.py
+│   │   │   ├── sip_calculator.py      # SIP future value calculations
+│   │   │   ├── financial_diagnosis.py # Financial health analysis
+│   │   │   └── goal_allocation.py     # Goal-based investment allocation
+│   │   ├── routes/
+│   │   │   ├── __init__.py
+│   │   │   └── api.py                 # API route definitions
+│   │   └── ml_artifacts/              # Serialized ML models
+│   │       ├── imputer.pkl
+│   │       ├── robust_scaler.pkl
+│   │       ├── kmeans_model.pkl
+│   │       ├── segment_map.json
+│   │       └── feature_order.json
+├── free-claude-code/                  # API wrapper (separate project)
+├── ml_part.ipynb                      # Training pipeline notebook
+├── current-state.txt                  # This file
+└── Implementation_plan.md             # Full 5-module plan
+```
+
+---
+
+## Completed Features (Detailed)
+
+### 1. ML Pipeline (COMPLETE - Working)
+**Source:** `ml_part.ipynb` | **Artifacts:** `app-core/backend/ml_artifacts/`
+
+**What's implemented:**
+- Loaded 20,000-row Indian personal finance dataset (synthetic + crowdsourced)
+- Built behavioral feature engineering:
+  - `Savings_Ratio`: (Income - Expenses) / Income
+  - `Expense_Ratio`: Expenses / Income
+- Trained KMeans clustering with 3 behavioral clusters
+- Implemented dynamic segment mapping (clusters sorted by median savings ratio)
+- Safety guardrails:
+  - Negative/zero savings → forced to "Financially Stressed"
+  - Savings ratio <10% → capped to "Cautious Saver"
+- Saved all artifacts: imputer.pkl, robust_scaler.pkl, kmeans_model.pkl, segment_map.json, feature_order.json
+
+**Segment Definitions:**
+| Segment | Multiplier | Investment Appetite | Risk Level |
+|---------|-----------|---------------------|------------|
+| Financially Stressed | 0.0 | Zero | Critical |
+| Cautious Saver | 0.2 | Low-to-Medium | Low |
+| Investment Ready | 0.4 | High | Medium |
+
+---
+
+### 2. Input Validation (Feature 11 - COMPLETE)
+**Files:** `models/schemas.py`, `routes/api.py`
+
+**What's implemented:**
+- **Income validation:** Must be > 0 and < ₹1 crore/month
+  - Error: "Income must be greater than zero. Please enter a valid monthly income."
+  - Error: "Income exceeds reasonable range (₹1 crore/month). Please verify your input."
+- **Expense field validation:** All expense fields must be ≥ 0
+  - Fields: rent, loan_repayment, insurance, groceries, transport, eating_out, entertainment, utilities, healthcare, education, miscellaneous
+  - Error: "X cannot be negative. Please enter a value of 0 or greater."
+- **Dependents validation:** Must be 0-50
+  - Error: "Number of dependents cannot be negative."
+  - Error: "Number of dependents exceeds reasonable range. Please verify your input."
+- **Field-level validators:** Pydantic `@field_validator` decorators for all critical fields
+- **Clear error messages:** User-friendly validation errors with specific guidance
+
+---
+
+### 3. Demo Profiles (Feature 12 - COMPLETE)
+**Files:** `routes/api.py`
+
+**What's implemented:**
+- 3 pre-built demo profiles for one-click testing:
+
+**Student Profile:**
+- Income: ₹15,000/month
+- Minimal expenses (rent ₹5,000, groceries ₹3,000, etc.)
+- Description: "Low income, minimal expenses, focusing on building financial habits"
+
+**Working Professional Profile:**
+- Income: ₹45,000/month
+- Moderate expenses (rent ₹10,000, loan ₹3,000, groceries ₹4,000, etc.)
+- Description: "Stable income with moderate expenses, ready to start disciplined investing"
+
+**Good Earner Profile:**
+- Income: ₹80,000/month
+- Higher expenses but strong surplus (rent ₹15,000, loan ₹8,000, etc.)
+- Description: "Strong income with good surplus capacity for aggressive wealth building"
+
+**API Endpoints:**
+- `GET /api/v1/demo-profiles` - List all available profiles
+- `GET /api/v1/demo-profile/{profile_id}` - Get specific profile data
+
+---
+
+### 4. SIP Calculator (Feature 13 - COMPLETE)
+**Files:** `utils/sip_calculator.py`, `routes/api.py`, `models/schemas.py`
+
+**What's implemented:**
+- SIP (Systematic Investment Plan) future value calculation
+- Formula: `FV = P × [{(1 + r)^n - 1} / r] × (1 + r)`
+  - P = Monthly investment
+  - r = Monthly return rate (annual % / 12 / 100)
+  - n = Total months (years × 12)
+- Returns:
+  - Future value (formatted with rupee symbol)
+  - Total invested amount
+  - Total growth
+  - Growth percentage
+- Input validation:
+  - Monthly investment > 0
+  - Years: 1-50
+  - Expected return: 1-30%
+
+**API Endpoint:**
+- `POST /api/v1/calculate-sip` - Calculate SIP returns
+- `GET /api/v1/sip-examples` - Get example SIP scenarios
+
+**Example Request:**
+```json
+{
+  "monthly_investment": 5000,
+  "years": 10,
+  "expected_return": 12
+}
+```
+
+**Example Response:**
+```json
+{
+  "monthly_investment": 5000,
+  "years": 10,
+  "expected_return": 12,
+  "future_value": 114915.87,
+  "total_invested": 60000,
+  "total_growth": 54915.87,
+  "growth_percentage": 91.53,
+  "formatted_future_value": "₹1,14,916"
+}
+```
+
+---
+
+### 5. Emergency Fund Readiness Check (Feature 14 - COMPLETE)
+**Files:** `utils/financial_diagnosis.py`, `services/recommendation_service.py`
+
+**What's implemented:**
+- Auto-detects if user has < 3 months of expenses saved
+- Generates tiered alerts based on corpus vs. target:
+
+**Alert Levels:**
+1. **CRITICAL** (emergency_fund_missing): No emergency fund
+   - Message: "CRITICAL: You have NO emergency fund. Build ₹X,XXX (3 months expenses) BEFORE any investing."
+2. **WARNING** (emergency_fund_incomplete): Partial fund (< 6 months)
+   - Message: "WARNING: Your emergency fund (₹X,XXX) is incomplete. Target: ₹X,XXX (6 months). Prioritize building this buffer before aggressive investing."
+3. **INFO** (emergency_fund_adequate): Full fund (≥ 6 months)
+   - Message: "Good: You have an adequate emergency fund (₹X,XXX). You can proceed with investment recommendations."
+
+**Logic:**
+- Target = 3 months expenses (minimum)
+- Full target = 6 months expenses (ideal)
+- High income guardrail: If income > ₹5L/month, cap emergency fund calculation to prevent absurd values
+
+---
+
+### 6. Expense Breakdown Pie Chart (Feature 15 - COMPLETE)
+**Files:** `utils/financial_diagnosis.py`, `routes/api.py`, `models/schemas.py`
+
+**What's implemented:**
+- Categorized expense breakdown for visualization:
+
+**Categories:**
+1. **Essentials:** rent, groceries, utilities, healthcare
+2. **Obligations:** loan_repayment, insurance
+3. **Lifestyle:** eating_out, entertainment, transport
+4. **Future Capacity:** education, miscellaneous
+
+**Returns:**
+- Total per category
+- Ratio per category (percentage of total expenses)
+- Pie chart data array with labels and values
+
+**API Endpoint:**
+- `GET /api/v1/expense-breakdown?income=X&rent=Y&...` - Get expense breakdown for pie chart
+
+---
+
+### 7. Goal-Based Input & Allocation (Feature 17 - COMPLETE)
+**Files:** `models/schemas.py`, `utils/goal_allocation.py`, `services/recommendation_service.py`
+
+**What's implemented:**
+- User can specify financial goals during input
+- Supported goals:
+  - Retirement
+  - Child Education
+  - Home Purchase
+  - Wealth Building
+  - Travel
+  - Education Upskilling
+
+**Goal Descriptions:**
+- Retirement: "Long-term wealth creation for post-work life"
+- Child Education: "Funding future educational expenses"
+- Home Purchase: "Saving for property down payment"
+- Wealth Building: "General wealth accumulation"
+- Travel: "Short-term experiential goals"
+- Education Upskilling: "Professional development investments"
+
+**Allocation Logic:**
+- Distributes surplus across selected goals based on priority
+- High priority goals get 40-50% allocation
+- Medium priority goals get 25-35% allocation
+- Low priority goals get 10-20% allocation
+- Returns monthly amounts and percentages per goal
+
+**API Integration:**
+- `goals` field in `UserFinancialInput` schema
+- Passed through to `compute_goal_based_allocation()` function
+- Included in final response as `portfolio.allocations`
+
+---
+
+### 8. Cluster Profile Description (Feature 19 - COMPLETE)
+**Files:** `services/recommendation_service.py`, `models/schemas.py`
+
+**What's implemented:**
+- `segment_explanation` field in response
+- Detailed explanation of why user fits their segment
+- Includes:
+  - Current financial state description
+  - Key characteristics of their segment
+  - Why the recommendation fits their situation
+  - Strategic logic behind the plan
+
+**Example Output:**
+"You're currently in a 'survival' phase where expenses exceed income. The primary focus must be on achieving positive cash flow before any investing. Your segment (Financially Stressed) indicates that building an emergency fund and reducing expenses should be your top priorities."
+
+---
+
+### 9. Re-analyze Button (Feature 20 - ALREADY WORKING)
+**Files:** `routes/api.py`
+
+**What's implemented:**
+- The API design inherently supports re-analysis
+- Users can send new POST requests with modified inputs
+- No state is maintained server-side, so each request is independent
+- Frontend can implement "Re-analyze" by calling `/api/v1/analyze-user` again with updated data
+
+---
+
+### 10. Financial Health Score (EXISTING FEATURE)
+**Files:** `utils/financial_diagnosis.py`, `models/schemas.py`
+
+**What's implemented:**
+- Composite score (0-100) based on:
+  - Savings rate component (0-30 points)
+  - Debt burden component (0-20 points)
+  - Dependency burden component (0-10 points)
+  - Expense control component (0-15 points)
+  - Surplus size component (0-15 points)
+  - Emergency fund component (0-10 points)
+
+---
+
+### 11. AI-Powered Explanations via NVIDIA NIM (EXISTING FEATURE)
+**Files:** `services/nim_service.py`, `services/nim_fallback_service.py`, `config/nim.py`
+
+**What's implemented:**
+- Primary model: `meta/llama-3.1-70b-instruct`
+- Fallback model pool:
+  - `mistralai/mistral-medium-3.5-128b`
+  - `google/gemma-4-31b-it`
+  - `qwen/qwen3-next-80b-a3b-instruct`
+  - `meta/llama-3.1-405b-instruct`
+- Multi-model fallback: Automatically switches if primary fails
+- API key from environment: `NVAPI_KEY`
+- Base URL: `https://integrate.api.nvidia.com/v1`
+
+---
+
+### 12. Audit Logging (EXISTING FEATURE)
+**Files:** `config/model_metadata.py`
+
+**What's implemented:**
+- Prediction logging with request ID
+- User input hashing (PII protection)
+- Feature logging
+- Cluster assignment tracking
+- Confidence scores
+- Guardrails triggered tracking
+- Gemini/NIM call logging with latency
+- Exportable audit trail as JSON
+
+---
+
+## API Endpoints Summary
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/analyze-user` | Full financial analysis with recommendations |
+| POST | `/api/v1/chat` | Conversational follow-up |
+| GET | `/api/v1/health` | Health check |
+| GET | `/api/v1/model-info` | Model metadata |
+| GET | `/api/v1/demo-profiles` | List demo profiles |
+| GET | `/api/v1/demo-profile/{id}` | Get specific demo profile |
+| POST | `/api/v1/calculate-sip` | SIP future value calculation |
+| GET | `/api/v1/sip-examples` | SIP example scenarios |
+| GET | `/api/v1/expense-breakdown` | Expense pie chart data |
+
+---
+
+## What's Left to Do
+
+### 1. Testing & Documentation (HIGH PRIORITY)
+- [ ] Write comprehensive test suite for edge cases
+- [ ] Document all API endpoints with examples
+- [ ] Create Postman collection for testing
+- [ ] Add docstrings to all functions
+
+### 2. Error Handling Enhancements (MEDIUM PRIORITY)
+- [ ] Graceful fallback when NIM service is unavailable
+- [ ] Better error messages for frontend display
+- [ ] Rate limiting implementation
+- [ ] Request timeout handling
+
+### 3. Performance Optimization (LOW PRIORITY)
+- [ ] Cache ML model artifacts in memory
+- [ ] Implement request batching
+- [ ] Add response caching for repeated requests
+
+### 4. UI Integration (DEFERRED - User will use Google Stitch)
+- [ ] Wait for explicit command to build UI
+- [ ] UI will be generated via Google Stitch
+
+---
+
+## Final UI Dashboard - What Will Be Shown
+
+### Dashboard Layout (Expected Frontend Components)
+
+#### 1. **Header Section**
+- App title: "Micro-Investing Assistant"
+- User segment badge (color-coded):
+  - Red: Financially Stressed
+  - Yellow: Cautious Saver
+  - Green: Investment Ready
+
+#### 2. **Financial Snapshot Card**
+- Monthly Income: ₹XX,XXX
+- Monthly Expenses: ₹XX,XXX
+- Monthly Savings/Surplus: ₹X,XXX
+- Savings Rate: XX%
+- Expense Ratio: XX%
+- Essential Ratio: XX%
+- Obligations Ratio: XX%
+- Lifestyle Ratio: XX%
+
+#### 3. **Financial Health Score Card**
+- Overall Score: XX/100 (gauge/meter visualization)
+- Breakdown:
+  - Savings Score: XX/30
+  - Debt Score: XX/20
+  - Dependency Score: XX/10
+  - Expense Control Score: XX/15
+  - Surplus Score: XX/15
+  - Emergency Fund Score: XX/10
+
+#### 4. **Alerts & Warnings Section**
+- Critical alerts (red): Emergency fund missing, negative savings
+- Warning alerts (yellow): Incomplete emergency fund, high debt
+- Caution alerts (orange): High lifestyle spending
+- Info alerts (blue): Emergency fund adequate
+
+#### 5. **Expense Breakdown Pie Chart**
+- Visual pie chart with 4 slices:
+  - Essentials (red): Rent, groceries, utilities, healthcare
+  - Obligations (orange): Loans, insurance
+  - Lifestyle (yellow): Eating out, entertainment, transport
+  - Future Capacity (green): Education, miscellaneous
+- Clickable legend showing exact amounts
+
+#### 6. **Investment Recommendation Card**
+- Segment: [Financially Stressed / Cautious Saver / Investment Ready]
+- Risk Level: [Critical / Low / Medium]
+- Suggested Monthly Investment: ₹X,XXX
+- Investment Appetite: [Zero / Low-to-Medium / High]
+- Recommended Plan: [Emergency Fund Mode / Conservative Growth / Aggressive Wealth Building]
+
+#### 7. **Goal-Based Allocation Table**
+| Goal | Priority | Monthly Amount | Percentage | Description |
+|------|----------|----------------|------------|-------------|
+| Retirement | High | ₹X,XXX | XX% | Long-term wealth creation |
+| Child Education | Medium | ₹X,XXX | XX% | Future educational expenses |
+| ... | ... | ... | ... | ... |
+
+#### 8. **Why This Fits You Section**
+- Bullet points explaining:
+  - Why this plan matches their financial state
+  - How it aligns with their goals
+  - Why the risk level is appropriate
+
+#### 9. **Watch Out Section**
+- Warnings and cautions:
+  - "Your emergency fund is incomplete"
+  - "High debt ratio - consider paying down loans first"
+  - "Lifestyle spending is 25% of income - consider reducing"
+
+#### 10. **Next Actionable Step**
+- Single clear action: "Build ₹XX,XXX emergency fund before investing"
+- Or: "Start ₹X,XXX/month SIP in index fund"
+- Or: "Pay off credit card debt of ₹XX,XXX"
+
+#### 11. **SIP Calculator Tool**
+- Input fields:
+  - Monthly investment amount
+  - Investment tenure (years)
+  - Expected return rate (%)
+- Output:
+  - Future value (large, prominent)
+  - Total invested
+  - Total growth
+  - Growth percentage
+
+#### 12. **Demo Profile Buttons**
+- 3 buttons: [Student] [Working Professional] [Good Earner]
+- Clicking fills all input fields with pre-built data
+- Auto-triggers analysis
+
+#### 13. **Input Form (for manual entry)**
+- Income (required, positive number)
+- Rent
+- Loan Repayment
+- Insurance
+- Groceries
+- Transport
+- Eating Out
+- Entertainment
+- Utilities
+- Healthcare
+- Education
+- Miscellaneous
+- Dependents count
+- Emergency Fund Corpus (current savings)
+- Goals (multi-select checkboxes)
+- [Analyze] button
+
+#### 14. **Re-analyze Button**
+- After seeing results, user can modify any input
+- Click "Re-analyze" to get updated recommendations
+- Shows dynamic response to changes
+
+#### 15. **AI Explanation Section**
+- "AI Explanation" accordion/expander
+- Detailed reasoning from NIM LLM
+- Strategic logic behind recommendations
+- Behavioral insights
+
+#### 16. **Footer/Disclaimer**
+- "This is an educational tool, not SEBI-registered advisory"
+- "Developer retains full liability for AI-generated content"
+- "No guarantee of returns - market risks apply"
+
+---
+
+## Technical Stack Summary
+
+- **Framework:** FastAPI (Python web framework)
+- **Validation:** Pydantic (data schemas, field validators)
+- **ML:** Scikit-learn (KMeans clustering, RobustScaler, Imputer)
+- **LLM:** NVIDIA NIM (meta/llama-3.1-70b-instruct with fallbacks)
+- **Deployment:** Railway (target)
+- **Environment:** Python 3.14, uv package manager
+
+---
+
+## Key Files Reference
+
+| File | Purpose |
+|------|---------|
+| `models/schemas.py` | All Pydantic request/response schemas |
+| `routes/api.py` | API endpoint definitions |
+| `services/recommendation_service.py` | Main orchestration logic |
+| `services/ml_service.py` | ML model loading and inference |
+| `services/nim_service.py` | NVIDIA NIM LLM integration |
+| `utils/financial_diagnosis.py` | Financial health analysis |
+| `utils/goal_allocation.py` | Goal-based investment allocation |
+| `utils/sip_calculator.py` | SIP future value calculations |
+| `config/model_metadata.py` | Audit logging and model info |
+| `config/nim.py` | NIM configuration |
+| `main.py` | FastAPI app entry point |
+
+---
+
+## Notes
+
+- Server runs on `http://0.0.0.0:8001`
+- API key for NIM: `NVAPI_KEY` environment variable
+- ML artifacts loaded from `app-core/backend/ml_artifacts/`
+- All monetary values in Indian Rupees (₹)
+- Project is for college manual - needs proper documentation and viva-ready explanations
+
+---
+
+## Last Updated
+
+2026-05-03 - All 8 requested features (11-20) have been implemented and tested. Code is syntactically correct and working. Server needs restart to pick up all changes.

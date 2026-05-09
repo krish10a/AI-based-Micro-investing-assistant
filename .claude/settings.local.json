@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir *)",
+      "Bash(Test-Path *)",
+      "Bash(powershell *)",
+      "Bash(python3 *)",
+      "Bash(python -c \"from models.schemas import UserFinancialInput; print\\(UserFinancialInput.model_json_schema\\(\\)\\)\")",
+      "Bash(python -c \"from models.schemas import UserFinancialInput; schema = UserFinancialInput.model_json_schema\\(\\); print\\('Income validation:', schema['properties']['income']\\)\")",
+      "Bash(Get-Content \"C:\\\\Users\\\\ASUS\\\\Desktop\\\\micro investing\\\\app-core\\\\backend\\\\utils\\\\goal_allocation.py\" -Raw)",
+      "Bash(Out-File -FilePath \"C:\\\\Users\\\\ASUS\\\\Desktop\\\\micro investing\\\\app-core\\\\backend\\\\utils\\\\goal_allocation.py\" -Encoding UTF8)",
+      "Bash(python -m py_compile services/recommendation_service.py)",
+      "Bash(tasklist)",
+      "Bash(findstr uvicorn *)",
+      "Bash(taskkill *)",
+      "Bash(powershell.exe *)",
+      "Bash(cd C:\\\\Users\\\\ASUS\\\\Desktop\\\\micro investing\\\\free-claude-code)",
+      "Bash(uv run *)",
+      "Bash(Select-Object -ExpandProperty Content)",
+      "Bash(curl *)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "PowerShell(Stop-Process *)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}
