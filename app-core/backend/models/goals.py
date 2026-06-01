@@ -79,6 +79,9 @@ class GoalResponse(GoalBase):
     monthly_suggested_contribution: float = Field(
         default=0, description="Suggested monthly contribution"
     )
+    status: Literal["on-track", "behind", "ahead", "completed"] = Field(
+        default="on-track", description="Goal status"
+    )
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 

@@ -140,8 +140,11 @@ class RecommendationService:
             "financial_snapshot": snapshot,
             "portfolio": portfolio,
             "reasoning": reasoning,
-            "financial_health_score": financial_metrics.financial_health_score,
-            "expense_insights": [
+            "health_score": {
+                "total_score": financial_metrics.financial_health_score,
+                "rating": self._get_health_rating(financial_metrics.financial_health_score)
+            },
+            "insights": [
                 {
                     "category": ei.category,
                     "severity": ei.severity,
@@ -151,6 +154,14 @@ class RecommendationService:
                 for ei in expense_insights
             ],
             "expense_summary": expense_summary,
+            "alerts": [
+                {
+                    "type": alert["type"],
+                    "severity": alert["severity"],
+                    "message": alert["message"]
+                }
+                for alert in financial_metrics.alerts
+            ],
             **legacy
         }
 
@@ -284,6 +295,17 @@ class RecommendationService:
             FinancialState.WEALTH_ACCELERATOR: "You're in the elite tier of savers. Your income far exceeds your lifestyle costs, allowing you to deploy capital aggressively across multiple asset classes for maximum velocity."
         }
         return explanations.get(state, "We're still analyzing your specific profile to provide a detailed explanation.")
+
+    def _get_health_rating(self, score: float) -> str:
+        """Convert numeric health score to rating label."""
+        if score >= 80:
+            return "Excellent"
+        elif score >= 60:
+            return "Good"
+        elif score >= 40:
+            return "Fair"
+        else:
+            return "Needs Improvement"
 
     def _get_safe_action(self, financial_metrics, goal_allocation) -> str:
         """Determine the safest first action."""

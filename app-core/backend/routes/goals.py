@@ -33,11 +33,9 @@ class GoalsListResponse(BaseModel):
     page_size: int
     total_pages: int
 
-
 class BulkGoalCreate(BaseModel):
     """Request model for creating multiple goals."""
     goals: List[GoalCreate]
-
 
 class BulkGoalResponse(BaseModel):
     """Response model for bulk goal creation."""
@@ -46,23 +44,19 @@ class BulkGoalResponse(BaseModel):
     total_created: int
     total_failed: int
 
-
 class GoalProgressUpdate(BaseModel):
     """Request model for updating goal progress."""
     amount: float = Field(..., gt=0, description="Amount to add to current progress")
-
 
 class GoalProgressResponse(BaseModel):
     """Response model for goal progress update."""
     message: str
     goal: GoalResponse
 
-
 class GoalDeleteResponse(BaseModel):
     """Response model for goal deletion."""
     message: str
     goal_id: str
-
 
 # ============================================================================
 # Helper Functions
@@ -71,7 +65,6 @@ class GoalDeleteResponse(BaseModel):
 def get_goals_service(db: Session) -> GoalsService:
     """Dependency for getting goals service."""
     return GoalsService(db)
-
 
 # ============================================================================
 # Routes
@@ -191,6 +184,81 @@ async def get_goals_summary(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not retrieve goals summary. Please try again."
+        )
+
+
+@router.get("/goals/templates")
+async def get_goal_templates(db: Session = Depends(get_db)):
+    """
+    Get available goal templates.
+
+    Returns a list of pre-configured goal templates that users can use as starting points.
+    """
+    try:
+        goals_service = get_goals_service(db)
+        templates = goals_service.get_goal_templates()
+        return {"templates": templates}
+    except Exception as e:
+        logger.error(f"Failed to get goal templates: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not retrieve goal templates. Please try again."
+        )
+
+
+@router.post("/goals/templates/{template_id}", response_model=GoalResponse)
+async def create_goal_from_template(
+    template_id: str,
+    target_amount: Optional[float] = Query(None, description="Override default target amount"),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a goal from a template.
+
+    Args:
+        template_id: Template ID to use
+        target_amount: Optional override for target amount
+
+    Returns:
+        Created goal
+    """
+    try:
+        goals_service = get_goals_service(db)
+        goal = goals_service.create_goal_from_template(current_user.id, template_id, target_amount)
+        return goal
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Failed to create goal from template: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not create goal from template. Please try again."
+        )
+
+
+@router.get("/goals/recommendations")
+async def get_goal_recommendations(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get goal recommendations based on user's current goals.
+
+    Returns personalized recommendations for improving goal progress.
+    """
+    try:
+        goals_service = get_goals_service(db)
+        recommendations = goals_service.get_goal_recommendations(current_user.id)
+        return {"recommendations": recommendations}
+    except Exception as e:
+        logger.error(f"Failed to get goal recommendations: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not retrieve goal recommendations. Please try again."
         )
 
 
@@ -414,79 +482,4 @@ async def get_goal_progress_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not retrieve goal progress history. Please try again."
-        )
-
-
-@router.get("/goals/templates")
-async def get_goal_templates(db: Session = Depends(get_db)):
-    """
-    Get available goal templates.
-
-    Returns a list of pre-configured goal templates that users can use as starting points.
-    """
-    try:
-        goals_service = get_goals_service(db)
-        templates = goals_service.get_goal_templates()
-        return {"templates": templates}
-    except Exception as e:
-        logger.error(f"Failed to get goal templates: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not retrieve goal templates. Please try again."
-        )
-
-
-@router.post("/goals/templates/{template_id}", response_model=GoalResponse)
-async def create_goal_from_template(
-    template_id: str,
-    target_amount: Optional[float] = Query(None, description="Override default target amount"),
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Create a goal from a template.
-
-    Args:
-        template_id: Template ID to use
-        target_amount: Optional override for target amount
-
-    Returns:
-        Created goal
-    """
-    try:
-        goals_service = get_goals_service(db)
-        goal = goals_service.create_goal_from_template(current_user.id, template_id, target_amount)
-        return goal
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_4022_UNPROCESSABLE_ENTITY,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Failed to create goal from template: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not create goal from template. Please try again."
-        )
-
-
-@router.get("/goals/recommendations")
-async def get_goal_recommendations(
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Get goal recommendations based on user's current goals.
-
-    Returns personalized recommendations for improving goal progress.
-    """
-    try:
-        goals_service = get_goals_service(db)
-        recommendations = goals_service.get_goal_recommendations(current_user.id)
-        return {"recommendations": recommendations}
-    except Exception as e:
-        logger.error(f"Failed to get goal recommendations: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not retrieve goal recommendations. Please try again."
         )

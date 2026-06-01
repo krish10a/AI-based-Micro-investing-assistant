@@ -3,6 +3,8 @@
 from typing import Dict, List, Any, Tuple
 from enum import Enum
 
+from utils.liquidity_rules import LiquidityRules
+
 
 class SafetyLevel(Enum):
     """Safety level for recommendations."""
@@ -23,6 +25,7 @@ class PolicyGuardrails:
     3. Stock tip requests → Refusal + redirect
     4. Low confidence → Caution banner
     5. Compliance with regulatory requirements
+    6. Liquidity guardrails → Emergency fund priority
     """
 
     def __init__(self):
@@ -32,6 +35,9 @@ class PolicyGuardrails:
         self.HIGH_DEBT_RATIO = 0.40
         self.LOW_CONFIDENCE_THRESHOLD = 0.50
         self.HIGH_DISCRETIONARY_RATIO = 0.20
+
+        # Initialize liquidity rules
+        self.liquidity_rules = LiquidityRules()
 
     def apply_guardrails(
         self,
@@ -45,6 +51,16 @@ class PolicyGuardrails:
             Tuple of (modified_recommendation, triggered_guardrails)
         """
         guardrails_triggered = []
+
+        # Step 1: Apply liquidity guardrails FIRST (highest priority)
+        recommendation, liquidity_triggered = self.liquidity_rules.apply_liquidity_guardrails(
+            recommendation, user_input
+        )
+        guardrails_triggered.extend(liquidity_triggered)
+
+        # If liquidity guardrails forced emergency mode, skip other checks
+        if any(rule.get("type") == "liquidity_insufficient" for rule in liquidity_triggered):
+            return recommendation, guardrails_triggered
 
         # Extract values
         savings = recommendation.get("financial_summary", {}).get("savings", 0)

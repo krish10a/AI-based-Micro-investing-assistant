@@ -2,18 +2,15 @@
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from main import create_app
-from database import get_db
-from models.db_models import Base, User
+from database import get_db, Base, engine
+from models.db_models import User
 from auth import get_password_hash, create_access_token
 from datetime import timedelta
 
 
-# Test database setup
-TEST_DATABASE_URL = "sqlite:///:memory:"
-engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+# Test database setup - use the same engine as the database module
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -23,6 +20,7 @@ def db_session():
     Base.metadata.create_all(bind=engine)
     session = TestingSessionLocal()
     try:
+        session.commit()  # Commit after creating tables
         yield session
     finally:
         session.close()
@@ -55,7 +53,7 @@ def auth_headers(test_client, db_session):
     user = User(
         id="test_user_1",
         email="test@example.com",
-        hashed_password=get_password_hash("testpassword"),
+        hashed_password=get_password_hash("testpass"),  # bcrypt max 72 bytes
         full_name="Test User",
         is_active=True
     )

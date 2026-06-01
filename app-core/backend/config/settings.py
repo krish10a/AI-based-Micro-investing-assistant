@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO")
 
     # NVIDIA NIM config - Updated to match working test config
-    nim_model: str = Field(default="meta/llama-3.1-70b-instruct")
+    nim_model: str = Field(default="meta/llama-3.1-8b-instruct")
     nim_temperature: float = Field(default=0.7)  # Match working NIM config
     nim_top_p: float = Field(default=0.9)        # Match working NIM config
     nim_max_tokens: int = Field(default=512)     # Reduced for faster response

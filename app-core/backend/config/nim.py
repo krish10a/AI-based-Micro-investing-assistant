@@ -17,28 +17,28 @@ class NIMModelConfig:
 # Primary model pool - ordered by priority
 NIM_MODEL_POOL: List[NIMModelConfig] = [
     NIMModelConfig(
-        model_id="meta/llama-3.1-70b-instruct",
-        name="Llama 3.1 70B Instruct",
+        model_id="meta/llama-3.1-8b-instruct",
+        name="Llama 3.1 8B Instruct",
         priority=1
     ),
     NIMModelConfig(
-        model_id="mistralai/mistral-medium-3.5-128b",
-        name="Mistral Medium 3.5 128B",
+        model_id="meta/llama-3.1-70b-instruct",
+        name="Llama 3.1 70B Instruct",
         priority=2
     ),
     NIMModelConfig(
-        model_id="google/gemma-4-31b-it",
-        name="Gemma 4 31B IT",
+        model_id="mistralai/mistral-7b-instruct-v0.3",
+        name="Mistral 7B Instruct v0.3",
         priority=3
     ),
     NIMModelConfig(
-        model_id="qwen/qwen3-next-80b-a3b-instruct",
-        name="Qwen3 Next 80B A3B Instruct",
+        model_id="mistralai/mixtral-8x7b-instruct-v0.1",
+        name="Mixtral 8x7B Instruct v0.1",
         priority=4
     ),
     NIMModelConfig(
-        model_id="meta/llama-3.1-405b-instruct",
-        name="Llama 3.1 405B Instruct",
+        model_id="nvidia/nemotron-4-340b-instruct",
+        name="Nemotron 4 340B Instruct",
         priority=5
     ),
 ]

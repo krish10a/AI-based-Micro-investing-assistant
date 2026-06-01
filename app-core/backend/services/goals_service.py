@@ -369,7 +369,12 @@ class GoalsService:
             return GoalStatusEnum.COMPLETED
 
         # Calculate expected progress based on timeline
-        days_elapsed = (datetime.utcnow() - goal.created_at).days
+        # Handle both datetime objects and ISO string formats
+        created_at = goal.created_at
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+
+        days_elapsed = (datetime.utcnow() - created_at).days
         total_days = goal.timeline_months * 30
         expected_progress = (days_elapsed / total_days) * 100 if total_days > 0 else 0
 
@@ -417,6 +422,7 @@ class GoalsService:
             current_amount=goal.current_amount,
             completion_percentage=goal.completion_percentage,
             monthly_suggested_contribution=goal.monthly_suggested_contribution,
+            status=goal.status.value,
             created_at=goal.created_at.isoformat(),
             updated_at=goal.updated_at.isoformat(),
         )

@@ -3,6 +3,7 @@
 import logging
 import time
 import uuid
+import asyncio
 from fastapi import APIRouter, HTTPException, status, Request
 from pydantic import ValidationError
 from fastapi.responses import JSONResponse
@@ -24,6 +25,11 @@ from models.ml_pipeline import MicroInvestmentAssistant
 from config.settings import settings
 from config.model_metadata import MODEL_INFO, AUDIT_LOGGER
 from utils.policy_guardrails import PolicyGuardrails
+from routes.auth import get_current_active_user, User
+from models.db_models import FinancialProfile
+from database import get_db
+from sqlalchemy.orm import Session
+from fastapi import Depends
 
 # Optional RAG integration
 try:
@@ -117,7 +123,12 @@ async def analyze_user(
 
 
 @router.post("/chat")
-async def chat(request: Request, chat_request: ChatRequest):
+async def chat(
+    request: Request, 
+    chat_request: ChatRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     """
     Handle conversational follow-up questions.
 
@@ -144,27 +155,113 @@ async def chat(request: Request, chat_request: ChatRequest):
                 "response": refusal_message
             })
 
+        # Get user profile from database for grounding
+        db_profile = db.query(FinancialProfile).filter(FinancialProfile.user_id == current_user.id).first()
+        user_profile = chat_request.user_profile
+
+        if db_profile and not user_profile:
+            # Fallback to DB profile if not provided by frontend - construct comprehensive profile
+            from utils.financial_diagnosis import compute_financial_metrics
+            from services.recommendation_service import RecommendationService
+            import json
+
+            # Build user input for financial diagnostics
+            raw_data_dict = {}
+            if db_profile.raw_data:
+                try:
+                    raw_data_dict = json.loads(db_profile.raw_data)
+                except (json.JSONDecodeError, TypeError):
+                    raw_data_dict = {}
+
+            user_input = {
+                "income": db_profile.monthly_income,
+                "rent": raw_data_dict.get("rent", 0),
+                "loan_repayment": raw_data_dict.get("loan_repayment", 0),
+                "insurance": raw_data_dict.get("insurance", 0),
+                "groceries": raw_data_dict.get("groceries", 0),
+                "transport": raw_data_dict.get("transport", 0),
+                "eating_out": raw_data_dict.get("eating_out", 0),
+                "entertainment": raw_data_dict.get("entertainment", 0),
+                "utilities": raw_data_dict.get("utilities", 0),
+                "healthcare": raw_data_dict.get("healthcare", 0),
+                "education": raw_data_dict.get("education", 0),
+                "miscellaneous": raw_data_dict.get("miscellaneous", 0),
+                "dependents": raw_data_dict.get("dependents", 1),
+                "emergency_fund_corpus": raw_data_dict.get("emergency_fund_corpus", 0),
+                "goals": []
+            }
+
+            # Compute financial metrics
+            financial_metrics = compute_financial_metrics(user_input)
+
+            # Get recommendation service for plan generation
+            recommendation_service_instance = RecommendationService()
+
+            # Generate a basic analysis to get portfolio allocation etc. (without NIM for speed)
+            analysis_result = recommendation_service_instance.analyze_user(user_input, skip_gemini=True)
+
+            user_profile = {
+                "user_id": current_user.id,
+                "income": db_profile.monthly_income,
+                "risk_tolerance": db_profile.risk_tolerance,
+                "user_segment": db_profile.user_segment,
+                # Financial metrics
+                "monthly_income": financial_metrics.monthly_income,
+                "monthly_expenses": financial_metrics.total_expenses,
+                "monthly_savings": financial_metrics.net_surplus,
+                "savings_rate": financial_metrics.savings_rate,
+                "expense_ratio": financial_metrics.expense_ratio,
+                "essential_expense_ratio": financial_metrics.essential_expense_ratio,
+                "discretionary_expense_ratio": financial_metrics.discretionary_expense_ratio,
+                "fixed_obligation_ratio": financial_metrics.fixed_obligation_ratio,
+                "dependency_burden": financial_metrics.dependency_burden,
+                # Category totals
+                "essentials_total": financial_metrics.essentials_total,
+                "obligations_total": financial_metrics.obligations_total,
+                "lifestyle_total": financial_metrics.lifestyle_total,
+                "future_capacity_total": financial_metrics.future_capacity_total,
+                # Financial state
+                "financial_state": financial_metrics.financial_state.value,
+                "financial_health_score": financial_metrics.financial_health_score,
+                "alerts": financial_metrics.alerts,
+                # From analysis result
+                "segment": analysis_result.get("segment", ""),
+                "risk_level": analysis_result.get("risk_level", {}),
+                "suggested_monthly_investment": analysis_result.get("suggested_monthly_investment", 0),
+                "investment_appetite": analysis_result.get("investment_appetite", ""),
+                "confidence": analysis_result.get("confidence", 0),
+                "reason_codes": analysis_result.get("reason_codes", []),
+                "recommended_plan": analysis_result.get("recommended_plan", ""),
+                "portfolio": analysis_result.get("portfolio", {}),
+                "profile": analysis_result.get("profile", {}),
+                "financial_snapshot": analysis_result.get("financial_snapshot", {}),
+                "reasoning": analysis_result.get("reasoning", {}),
+                "health_score": analysis_result.get("health_score", {}),
+                "insights": analysis_result.get("insights", []),
+                "expense_summary": analysis_result.get("expense_summary", {}),
+                # Financial summary dict (what NIM service expects)
+                "financial_summary_dict": {
+                    "income": financial_metrics.monthly_income,
+                    "total_expenses": financial_metrics.total_expenses,
+                    "savings": financial_metrics.net_surplus,
+                    "savings_ratio": financial_metrics.savings_rate
+                }
+            }
+
         # Retrieve RAG context if available
         rag_context = None
-        if RAG_AVAILABLE and chat_request.user_profile:
+        if RAG_AVAILABLE:
             try:
-                import asyncio
                 rag_settings = RAGSettings.from_env()
                 if rag_settings.pinecone_api_key and rag_settings.pinecone_index_name:
                     rag_service = RAGService(settings=rag_settings)
-                    # Get user ID from profile if available
-                    user_id = chat_request.user_profile.get("user_id", "")
-                    if user_id:
-                        filter_dict = {"source": f"user_{user_id}"}
-                    else:
-                        filter_dict = None
+                    # Filter by user ID for privacy and accuracy
+                    filter_dict = {"source": f"user_{current_user.id}"}
 
-                    rag_context = asyncio.get_event_loop().run_until_complete(
-                        rag_service.retrieve_as_context(
-                            chat_request.message,
-                            top_k=3,
-                            filter=filter_dict
-                        )
+                    rag_context = await rag_service.retrieve_as_context(
+                        chat_request.message,
+                        top_k=3,
+                        filter=filter_dict
                     )
                     logger.info(f"[{request_id}] Retrieved RAG context")
             except Exception as rag_error:
@@ -175,7 +272,7 @@ async def chat(request: Request, chat_request: ChatRequest):
         logger.info(f"[{request_id}] Processing chat request")
 
         # Augment user profile with RAG context if available
-        enriched_profile = chat_request.user_profile.copy() if chat_request.user_profile else {}
+        enriched_profile = user_profile.copy() if user_profile else {}
         if rag_context and rag_context != "No relevant context found.":
             enriched_profile["rag_context"] = rag_context
 

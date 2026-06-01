@@ -79,13 +79,13 @@ class TestMLPipeline:
         assert rec["suggested_monthly_investment"] == 0.0
         assert len(rec["reason_codes"]) > 0
 
-    def test_confidence_score_range(self):
-        """Test that confidence is in valid range."""
+    def test_cluster_separation_score_range(self):
+        """Test that cluster separation score is in valid range."""
         from models.ml_pipeline import MicroInvestmentAssistant
         assistant = MicroInvestmentAssistant()
 
-        conf = assistant.confidence([0.5, 0.5])
-        assert 0.0 <= conf <= 1.0
+        score = assistant.cluster_separation_score([0.5, 0.5])
+        assert 0.0 <= score <= 1.0
 
     def test_get_model_info(self):
         """Test model info retrieval."""

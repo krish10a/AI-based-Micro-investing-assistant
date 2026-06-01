@@ -32,12 +32,48 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     full_name = Column(String, nullable=True)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    date_of_birth = Column(String, nullable=True)
+    address = Column(String, nullable=True)
+    kyc_verified = Column(Boolean, default=False)
+    is_onboarded = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     goals = relationship("Goal", back_populates="user", cascade="all, delete-orphan")
+    financial_profile = relationship("FinancialProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+
+
+class FinancialProfile(Base):
+    """User financial profile data from onboarding."""
+
+    __tablename__ = "financial_profiles"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+
+    # Financial data
+    monthly_income = Column(Float, nullable=False)
+    monthly_expenses = Column(Float, nullable=False)
+    savings_rate = Column(Float, nullable=False)
+    
+    # Segment and risk
+    user_segment = Column(String, nullable=True)
+    risk_tolerance = Column(String, nullable=True)
+    investment_experience = Column(String, nullable=True)
+    
+    # Raw JSON data for flexibility
+    raw_data = Column(Text, nullable=True) 
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="financial_profile")
 
 
 class Goal(Base):

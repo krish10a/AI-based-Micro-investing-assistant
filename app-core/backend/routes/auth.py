@@ -19,6 +19,7 @@ from auth import (
     get_current_active_user
 )
 from models.db_models import User
+from models.schemas import FinancialOnlyOnboardRequest
 from config.settings import settings
 from services.recommendation_service import RecommendationService
 
@@ -76,7 +77,7 @@ class UserResponse(BaseModel):
 class LoginRequest(BaseModel):
     """Login request model."""
     email: str = Field(..., pattern=r"^[\w\.-]+@[\w\.-]+\.\w+$", description="User email")
-    password: str = Field(..., min_length=6, description="User password")
+    password: str = Field(..., min_length=1, description="User password")
 
 
 class LoginResponse(BaseModel):
@@ -87,6 +88,7 @@ class LoginResponse(BaseModel):
     expires_in: int = 3600
     user_id: Optional[str] = None
     message: Optional[str] = None
+    user: Optional[dict] = None
 
 
 class BiometricRequest(BaseModel):
@@ -121,7 +123,7 @@ class OnboardRequest(BaseModel):
     kyc_document_number: Optional[str] = Field(None, max_length=50)
 
     # Financial profile
-    income: float = Field(..., gt=0)
+    income: float = Field(..., ge=0)
     rent: float = Field(default=0, ge=0)
     loan_repayment: float = Field(default=0, ge=0)
     insurance: float = Field(default=0, ge=0)
@@ -179,13 +181,6 @@ class VerifyIdentityResponse(BaseModel):
     verified_at: Optional[str] = None
 
 
-# =============================================================================
-# Mock Authentication Storage (for backward compatibility)
-# =============================================================================
-
-# In-memory storage for demo (replace with database in production)
-users_db: Dict[str, Dict[str, Any]] = {}
-user_counter = 0
 
 
 def _generate_access_token(user_id: str) -> str:
@@ -254,23 +249,41 @@ async def register(user_data: UserRegister, db: Session = Depends(get_db)):
         )
 
 
-@router.post("/auth/login", response_model=TokenResponse)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+@router.post("/auth/login", response_model=LoginResponse)
+async def login(login_data: LoginRequest):
     """
-    Authenticate user and return access token.
+    Authenticate user with email and password.
 
-    Args:
-        username: User email address
-        password: User password
+    For demo purposes, auto-registers new users if they don't exist.
 
-    Returns:
-        Access token and user data
+    Returns a JWT-like access token valid for 1 hour.
     """
     try:
-        # Find user by email
-        user = db.query(User).filter(User.email == form_data.username).first()
+        # Get database session
+        from database import get_db
+        from sqlalchemy.orm import Session
 
-        if not user or not verify_password(form_data.password, user.hashed_password):
+        db_gen = get_db()
+        db: Session = next(db_gen)
+
+        user = db.query(User).filter(User.email == login_data.email).first()
+
+        # Auto-register new users for demo convenience
+        if not user:
+            import uuid
+            logger.info(f"Auto-registering new user: {login_data.email}")
+            user = User(
+                id=str(uuid.uuid4()),
+                email=login_data.email,
+                hashed_password=get_password_hash(login_data.password),
+                full_name=login_data.email.split("@")[0],  # Use email username as full name
+                is_active=True,
+                is_onboarded=False
+            )
+            db.add(user)
+            db.commit()
+
+        if not verify_password(login_data.password, user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
@@ -290,65 +303,26 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
             expires_delta=access_token_expires
         )
 
-        logger.info(f"User logged in: {user.email}")
-
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "expires_in": settings.access_token_expire_minutes * 60,
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "full_name": user.full_name,
-                "is_active": user.is_active
-            }
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Login failed: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Login failed. Please try again."
-        )
-
-
-@router.post("/auth/login", response_model=LoginResponse)
-async def login_legacy(login_data: LoginRequest):
-    """
-    Legacy login endpoint for backward compatibility.
-
-    Authenticate user with email and password.
-    Returns a JWT-like access token valid for 1 hour.
-    """
-    try:
-        # Mock authentication - in production, verify against hashed password
-        user = users_db.get(login_data.email)
-
-        if not user:
-            # Auto-create user for demo purposes
-            user_id = f"user_{secrets.token_hex(8)}"
-            user = {
-                "user_id": user_id,
-                "email": login_data.email,
-                "created_at": datetime.utcnow().isoformat(),
-            }
-            users_db[login_data.email] = user
-
-        # For demo, accept any password with 6+ chars
-        access_token = _generate_access_token(user["user_id"])
-
         logger.info(f"User logged in: {login_data.email}")
 
         return LoginResponse(
             success=True,
             access_token=access_token,
             token_type="bearer",
-            expires_in=3600,
-            user_id=user["user_id"],
+            expires_in=settings.access_token_expire_minutes * 60,
+            user_id=user.id,
+            user={
+                "id": user.id,
+                "email": user.email,
+                "first_name": user.full_name.split(" ")[0] if user.full_name else "",
+                "last_name": " ".join(user.full_name.split(" ")[1:]) if user.full_name and len(user.full_name.split(" ")) > 1 else "",
+                "is_onboarded": user.is_onboarded
+            }
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Login failed: {e}")
+        logger.error(f"Login failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Authentication failed",
@@ -372,47 +346,67 @@ async def get_current_user_info(current_user: User = Depends(get_current_active_
     }
 
 
-@router.get("/auth/me")
-async def get_current_user_legacy(access_token: str):
-    """
-    Legacy get current user endpoint for backward compatibility.
 
-    Get current user profile from access token.
-    In production, decode JWT and fetch user from database.
+
+@router.post("/auth/guest", response_model=LoginResponse)
+async def guest_login():
+    """
+    Create a guest user session.
+
+    For demo purposes - creates a temporary user that can complete onboarding.
     """
     try:
-        # Mock: extract user_id from token
-        if not access_token or not access_token.startswith("user_"):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token",
-            )
+        from database import get_db
+        from sqlalchemy.orm import Session
+        import uuid
 
-        user_id = access_token.split(":")[0] if ":" in access_token else access_token
+        db_gen = get_db()
+        db: Session = next(db_gen)
 
-        # Find user by ID (simplified for demo)
-        for email, user in users_db.items():
-            if user.get("user_id") == user_id:
-                return {
-                    "user_id": user["user_id"],
-                    "email": user["email"],
-                    "first_name": user.get("first_name"),
-                    "last_name": user.get("last_name"),
-                    "kyc_verified": user.get("kyc_verified", False),
-                    "segment": user.get("segment"),
-                }
+        # Generate unique guest user
+        guest_id = str(uuid.uuid4())
+        guest_email = f"guest_{guest_id[:8]}@guest.local"
 
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
+        # Create guest user
+        guest_user = User(
+            id=guest_id,
+            email=guest_email,
+            hashed_password=get_password_hash("guest"),
+            full_name="Guest User",
+            is_active=True,
+            is_onboarded=False
         )
-    except HTTPException:
-        raise
+        db.add(guest_user)
+        db.commit()
+
+        # Create access token
+        access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
+        access_token = create_access_token(
+            data={"sub": guest_user.id, "email": guest_user.email},
+            expires_delta=access_token_expires
+        )
+
+        logger.info(f"Guest user created: {guest_email}")
+
+        return LoginResponse(
+            success=True,
+            access_token=access_token,
+            token_type="bearer",
+            expires_in=settings.access_token_expire_minutes * 60,
+            user_id=guest_user.id,
+            user={
+                "id": guest_user.id,
+                "email": guest_email,
+                "first_name": "Guest",
+                "last_name": "User",
+                "is_onboarded": False
+            }
+        )
     except Exception as e:
-        logger.error(f"Get current user failed: {e}")
+        logger.error(f"Guest login failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Could not fetch user profile",
+            detail="Guest login failed",
         )
 
 
@@ -547,24 +541,15 @@ async def verify_identity(request: VerifyIdentityRequest):
 
 
 @router.post("/users/onboard", response_model=OnboardResponse)
-async def onboard_user(request: OnboardRequest):
+async def onboard_user(
+    request: OnboardRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     """
     Complete onboarding with identity verification and financial analysis.
-
-    This endpoint:
-    1. Creates user profile
-    2. Verifies identity (mock)
-    3. Runs ML clustering analysis
-    4. Returns investment recommendation
-    5. Ingests analysis into Pinecone for RAG (if configured)
     """
     try:
-        global user_counter
-        user_counter += 1
-
-        # Create user ID
-        user_id = f"user_{user_counter:08d}"
-
         # Prepare financial input for analysis
         financial_input = {
             "income": request.income,
@@ -587,30 +572,43 @@ async def onboard_user(request: OnboardRequest):
         # Run ML analysis
         analysis_result = recommendation_service.analyze_user(financial_input, skip_gemini=True)
 
-        # Store user
-        user_data = {
-            "user_id": user_id,
-            "email": request.email,
-            "first_name": request.first_name,
-            "last_name": request.last_name,
-            "phone": request.phone,
-            "date_of_birth": request.date_of_birth,
-            "kyc_verified": request.kyc_verified,
-            "created_at": datetime.utcnow().isoformat(),
-            "financial_profile": financial_input,
-            "segment": analysis_result.get("segment"),
-            "risk_tolerance": request.risk_tolerance,
-        }
-        users_db[request.email] = user_data
-
-        # Ingest user analysis into Pinecone for RAG (if available)
-        # Format user analysis as readable text for RAG
+        # Calculate total expenses
         total_expenses = (request.rent + request.loan_repayment + request.insurance +
                          request.groceries + request.transport + request.eating_out +
                          request.entertainment + request.utilities + request.healthcare +
                          request.education + request.miscellaneous)
         surplus = request.income - total_expenses
 
+        # Persist Financial Profile to Database
+        from models.db_models import FinancialProfile
+        import json
+        import uuid
+
+        # Check if profile exists, otherwise create
+        financial_profile = db.query(FinancialProfile).filter(FinancialProfile.user_id == current_user.id).first()
+        
+        if not financial_profile:
+            financial_profile = FinancialProfile(
+                id=str(uuid.uuid4()),
+                user_id=current_user.id
+            )
+            db.add(financial_profile)
+
+        financial_profile.monthly_income = request.income
+        financial_profile.monthly_expenses = total_expenses
+        financial_profile.savings_rate = surplus / request.income if request.income > 0 else 0
+        financial_profile.user_segment = analysis_result.get("segment")
+        financial_profile.risk_tolerance = request.risk_tolerance
+        financial_profile.investment_experience = request.investment_experience
+        financial_profile.raw_data = json.dumps(financial_input)
+
+        # Update user onboarding status
+        current_user.is_onboarded = True
+        current_user.full_name = f"{request.first_name} {request.last_name}"
+
+        db.commit()
+
+        # Format user analysis for RAG ingestion
         insights_text = "\n".join([f"- {insight.get('title', 'Insight')}: {insight.get('content', '')}"
                                   for insight in analysis_result.get('insights', [])])
         alerts_text = "\n".join([f"- {alert.get('title', 'Alert')}: {alert.get('content', '')}"
@@ -619,9 +617,9 @@ async def onboard_user(request: OnboardRequest):
         analysis_text = f"""USER FINANCIAL PROFILE AND ANALYSIS REPORT
 ==========================================
 
-User ID: {user_id}
-Name: {request.first_name} {request.last_name}
-Email: {request.email}
+User ID: {current_user.id}
+Name: {current_user.full_name}
+Email: {current_user.email}
 Segment: {analysis_result.get('segment', 'Unknown')}
 Risk Tolerance: {request.risk_tolerance}
 Risk Level: {analysis_result.get('risk_level', {}).get('label', 'Unknown')}
@@ -645,24 +643,23 @@ ALERTS:
 {alerts_text}
 """
 
-        # Create RAG service and ingest document
+        # RAG ingestion logic
         if RAG_AVAILABLE:
             try:
                 rag_settings = RAGSettings.from_env()
                 if rag_settings.pinecone_api_key and rag_settings.pinecone_index_name:
                     rag_service = RAGService(settings=rag_settings)
-                    await rag_service.ingest_document(analysis_text, source=f"user_{user_id}")
-                    logger.info(f"[{user_id}] Analysis ingested into Pinecone")
+                    await rag_service.ingest_document(analysis_text, source=f"user_{current_user.id}")
+                    logger.info(f"[{current_user.id}] Analysis ingested into Pinecone")
             except Exception as rag_error:
-                logger.warning(f"[{user_id}] RAG ingestion failed: {rag_error}")
-                # Don't fail onboarding if RAG fails
+                logger.warning(f"[{current_user.id}] RAG ingestion failed: {rag_error}")
 
-        logger.info(f"User onboarded: {request.email}, Segment: {analysis_result.get('segment')}")
+        logger.info(f"User onboarded: {current_user.email}, Segment: {analysis_result.get('segment')}")
 
         return OnboardResponse(
             success=True,
-            user_id=user_id,
-            email=request.email,
+            user_id=current_user.id,
+            email=current_user.email,
             segment=analysis_result.get("segment", "Unknown"),
             risk_level=analysis_result.get("risk_level", {"label": "Unknown", "color": "gray"}),
             suggested_monthly_investment=analysis_result.get("suggested_monthly_investment", 0),
@@ -677,4 +674,130 @@ ALERTS:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Onboarding failed. Please try again.",
+        )
+
+
+@router.post("/users/onboard-financial", response_model=OnboardResponse)
+async def onboard_user_financial(
+    request: FinancialOnlyOnboardRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Complete financial-only onboarding without personal information requirements.
+    """
+    try:
+        # Prepare financial input for analysis
+        financial_input = {
+            "income": request.income,
+            "rent": request.rent,
+            "loan_repayment": request.loan_repayment,
+            "insurance": request.insurance,
+            "groceries": request.groceries,
+            "transport": request.transport,
+            "eating_out": request.eating_out,
+            "entertainment": request.entertainment,
+            "utilities": request.utilities,
+            "healthcare": request.healthcare,
+            "education": request.education,
+            "miscellaneous": request.miscellaneous,
+            "dependents": request.dependents,
+            "emergency_fund_corpus": request.emergency_fund_corpus,
+            "goals": request.goals,
+        }
+
+        # Run ML analysis
+        analysis_result = recommendation_service.analyze_user(financial_input, skip_gemini=True)
+
+        # Calculate total expenses
+        total_expenses = (request.rent + request.loan_repayment + request.insurance +
+                         request.groceries + request.transport + request.eating_out +
+                         request.entertainment + request.utilities + request.healthcare +
+                         request.education + request.miscellaneous)
+        surplus = request.income - total_expenses
+
+        # Persist Financial Profile to Database
+        from models.db_models import FinancialProfile
+        import json
+        import uuid
+
+        # Check if profile exists, otherwise create
+        financial_profile = db.query(FinancialProfile).filter(FinancialProfile.user_id == current_user.id).first()
+
+        if not financial_profile:
+            financial_profile = FinancialProfile(
+                id=str(uuid.uuid4()),
+                user_id=current_user.id
+            )
+            db.add(financial_profile)
+
+        financial_profile.monthly_income = request.income
+        financial_profile.monthly_expenses = total_expenses
+        financial_profile.savings_rate = surplus / request.income if request.income > 0 else 0
+        financial_profile.user_segment = analysis_result.get("segment")
+        financial_profile.risk_tolerance = "moderate"  # Default value
+        financial_profile.investment_experience = "beginner"  # Default value
+        financial_profile.raw_data = json.dumps(financial_input)
+
+        # Update user onboarding status
+        current_user.is_onboarded = True
+
+        db.commit()
+
+        logger.info(f"User financial-only onboarded: {current_user.email}, Segment: {analysis_result.get('segment')}")
+
+        return OnboardResponse(
+            success=True,
+            user_id=current_user.id,
+            email=current_user.email,
+            segment=analysis_result.get("segment", "Unknown"),
+            risk_level=analysis_result.get("risk_level", {"label": "Unknown", "color": "gray"}),
+            suggested_monthly_investment=analysis_result.get("suggested_monthly_investment", 0),
+            investment_appetite=analysis_result.get("investment_appetite", "Unknown"),
+            recommended_plan=analysis_result.get("recommended_plan", "No plan"),
+            confidence=analysis_result.get("confidence", 0),
+            kyc_status="verified",
+            message="Financial-only onboarding completed successfully",
+        )
+    except Exception as e:
+        logger.error(f"Financial-only onboarding failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Financial-only onboarding failed. Please try again.",
+        )
+
+
+@router.get("/users/analysis")
+async def get_user_analysis(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve the persistent financial analysis for the current user.
+    """
+    try:
+        from models.db_models import FinancialProfile
+        import json
+
+        financial_profile = db.query(FinancialProfile).filter(FinancialProfile.user_id == current_user.id).first()
+
+        if not financial_profile or not financial_profile.raw_data:
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"success": False, "message": "Financial profile not found. Please complete onboarding."}
+            )
+
+        # Parse the raw data
+        financial_input = json.loads(financial_profile.raw_data)
+
+        # Run analysis
+        analysis_result = recommendation_service.analyze_user(financial_input, skip_gemini=True)
+
+        return analysis_result
+
+    except Exception as e:
+        logger.error(f"Failed to fetch user analysis: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not retrieve analysis data."
         )

@@ -306,13 +306,25 @@ def generate_alerts(
                     "severity": "critical",
                     "message": f"CRITICAL: You have NO emergency fund. Build ₹{emergency_target:,.0f} (3 months expenses) BEFORE any investing. Start with ₹{min(net_surplus * 0.5, 10000):,.0f}/month until target is reached."
                 })
-            elif emergency_fund_corpus < emergency_target_full:
+            else:
                 months_covered = emergency_fund_corpus / monthly_expenses
+                # Only suggest saving if net_surplus is positive
+                if net_surplus > 0:
+                    savings_suggestion = f"Continue with ₹{min(net_surplus * 0.5, 10000):,.0f}/month until target is reached."
+                else:
+                    savings_suggestion = "Focus on reducing expenses or increasing income to build positive savings first."
                 alerts.append({
-                    "type": "emergency_fund_incomplete",
-                    "severity": "warning",
-                    "message": f"Your emergency fund (₹{emergency_fund_corpus:,.0f}) covers only {months_covered:.1f} months. Target: ₹{emergency_target_full:,.0f} (6 months). Continue building before aggressive investing."
+                    "type": "emergency_fund_partial",
+                    "severity": "critical",
+                    "message": f"Your emergency fund (₹{emergency_fund_corpus:,.0f}) covers only {months_covered:.1f} months. Build ₹{emergency_target:,.0f} (3 months expenses) BEFORE any investing. {savings_suggestion}"
                 })
+        elif emergency_fund_corpus < emergency_target_full:
+            months_covered = emergency_fund_corpus / monthly_expenses
+            alerts.append({
+                "type": "emergency_fund_incomplete",
+                "severity": "warning",
+                "message": f"Your emergency fund (₹{emergency_fund_corpus:,.0f}) covers only {months_covered:.1f} months. Target: ₹{emergency_target_full:,.0f} (6 months). Continue building before aggressive investing."
+            })
         elif emergency_fund_corpus >= emergency_target_full:
             months_covered = emergency_fund_corpus / monthly_expenses
             alerts.append({

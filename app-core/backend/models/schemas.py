@@ -1,7 +1,7 @@
 """Pydantic schemas for API request/response validation."""
 
 import enum
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Dict, Any, Union
 
 
@@ -12,7 +12,7 @@ from typing import Optional, List, Dict, Any, Union
 class UserFinancialInput(BaseModel):
     """User financial information for analysis."""
 
-    income: float = Field(..., description="Monthly income (must be positive)", gt=0)
+    income: float = Field(..., description="Monthly income (zero or positive)", ge=0)
     rent: float = Field(default=0, ge=0)
     loan_repayment: float = Field(default=0, ge=0)
     insurance: float = Field(default=0, ge=0)
@@ -32,8 +32,8 @@ class UserFinancialInput(BaseModel):
     @classmethod
     def validate_income(cls, v):
         """Validate income is within reasonable bounds."""
-        if v <= 0:
-            raise ValueError('Income must be greater than zero. Please enter a valid monthly income.')
+        if v < 0:
+            raise ValueError('Income cannot be negative. Please enter a valid monthly income.')
         if v > 10000000:  # 1 Crore per month
             raise ValueError('Income exceeds reasonable range (₹1 crore/month). Please verify your input.')
         return v
@@ -58,6 +58,51 @@ class UserFinancialInput(BaseModel):
         if v > 50:
             raise ValueError('Number of dependents exceeds reasonable range. Please verify your input.')
         return v
+
+    @field_validator('emergency_fund_corpus')
+    @classmethod
+    def validate_emergency_fund(cls, v):
+        """Validate emergency fund corpus is non-negative."""
+        if v < 0:
+            raise ValueError('Emergency fund corpus cannot be negative.')
+        return v
+
+    @field_validator('goals')
+    @classmethod
+    def validate_goals(cls, v):
+        """Validate goals are from allowed list."""
+        valid_goals = [
+            "Retirement", "Child Education", "Home Purchase",
+            "Wealth Building", "Travel", "Education Upskilling"
+        ]
+        for goal in v:
+            if goal not in valid_goals:
+                raise ValueError(f'Invalid goal: {goal}. Valid options: {", ".join(valid_goals)}')
+        return v
+
+    @model_validator(mode='after')
+    def validate_income_expense_consistency(self) -> 'UserFinancialInput':
+        """Cross-field validation for income vs expense consistency."""
+        total_expenses = (
+            self.rent + self.loan_repayment + self.insurance + self.groceries +
+            self.transport + self.eating_out + self.entertainment + self.utilities +
+            self.healthcare + self.education + self.miscellaneous
+        )
+
+        # Expenses can't exceed 120% of income
+        if total_expenses > self.income * 1.2:
+            raise ValueError(
+                f'Total expenses (₹{total_expenses:,.0f}) exceed 120% of income (₹{self.income:,.0f}). '
+                'Please verify your expense entries.'
+            )
+
+        # Check for suspicious zero expenses with reasonable income
+        if total_expenses == 0 and self.income > 10000:
+            raise ValueError(
+                'Total expenses are zero. This is unusual. Please verify your expense entries.'
+            )
+
+        return self
 
     class Config:
         json_schema_extra = {
@@ -335,9 +380,29 @@ class UserProfileUpdate(BaseModel):
     first_name: Optional[str] = Field(None, min_length=1, max_length=50)
     last_name: Optional[str] = Field(None, min_length=1, max_length=50)
     phone: Optional[str] = Field(None, min_length=10, max_length=15)
+    date_of_birth: Optional[str] = Field(None, description="Date of birth YYYY-MM-DD")
     address: Optional[str] = Field(None, max_length=200)
     risk_tolerance: Optional[str] = Field(None, description="low, moderate, high")
 
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v):
+        """Validate phone format."""
+        if v is not None:
+            import re
+            if not re.match(r'^\+?[0-9\-\s]{10,15}$', v):
+                raise ValueError('Invalid phone number format')
+        return v
+
+    @field_validator('date_of_birth')
+    @classmethod
+    def validate_dob(cls, v):
+        """Validate date format."""
+        if v is not None:
+            import re
+            if not re.match(r'^\d{4}-\d{2}-\d{2}$', v):
+                raise ValueError('Invalid date format. Expected YYYY-MM-DD')
+        return v
 
 class UserProfileResponse(BaseModel):
     """User profile response."""
@@ -593,3 +658,24 @@ class ReportExportResponse(BaseModel):
     file_size: Optional[int] = None
     format: str
     message: str
+
+
+class FinancialOnlyOnboardRequest(BaseModel):
+    """Financial-only onboarding request without personal information requirements."""
+
+    # Financial profile only
+    income: float = Field(..., ge=0)
+    rent: float = Field(default=0, ge=0)
+    loan_repayment: float = Field(default=0, ge=0)
+    insurance: float = Field(default=0, ge=0)
+    groceries: float = Field(default=0, ge=0)
+    transport: float = Field(default=0, ge=0)
+    eating_out: float = Field(default=0, ge=0)
+    entertainment: float = Field(default=0, ge=0)
+    utilities: float = Field(default=0, ge=0)
+    healthcare: float = Field(default=0, ge=0)
+    education: float = Field(default=0, ge=0)
+    miscellaneous: float = Field(default=0, ge=0)
+    dependents: int = Field(default=1, ge=0)
+    emergency_fund_corpus: float = Field(default=0, ge=0)
+    goals: list = Field(default=[])

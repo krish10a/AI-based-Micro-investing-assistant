@@ -29,10 +29,10 @@ class NIMService:
         Generate beginner-friendly explanation with automatic fallback.
 
         If the primary model fails, automatically tries:
-        1. mistralai/mistral-medium-3.5-128b
-        2. google/gemma-4-31b-it
-        3. qwen/qwen3-next-80b-a3b-instruct
-        4. meta/llama-3.1-405b-instruct
+        1. meta/llama-3.1-405b-instruct
+        2. mistralai/mistral-large-2-instruct
+        3. google/gemma-2-27b-it
+        4. google/gemma-2-9b-it
 
         If all models fail, returns rule-based fallback explanation.
 

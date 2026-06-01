@@ -182,8 +182,22 @@ class MicroInvestmentAssistant:
 
         return recommendation, segment_override, multiplier_override
 
-    def confidence(self, features: list[float]) -> float:
-        """Compute prediction confidence based on cluster distance."""
+    def cluster_separation_score(self, features: list[float]) -> float:
+        """
+        Compute cluster separation score (heuristic, not calibrated probability).
+
+        This is a cluster separation heuristic based on distance to nearest cluster centers.
+        Higher values indicate the user is clearly in one cluster (not on boundary).
+
+        Note: This is NOT a calibrated confidence score. It measures how well-separated
+        the user's features are from other clusters, not the reliability of recommendations.
+
+        Args:
+            features: User feature vector
+
+        Returns:
+            Separation score between 0.0 and 1.0
+        """
         X_sc = self._preprocess(features)
         dists = self.kmeans.transform(X_sc)[0]
         sorted_dists = np.sort(dists)
@@ -193,8 +207,9 @@ class MicroInvestmentAssistant:
 
         best = sorted_dists[0]
         second = sorted_dists[1]
-        conf = second / (best + second + 1e-9)
-        return float(np.clip(conf, 0.0, 1.0))
+        # Ratio of second to (best+second) -> higher when best is much smaller
+        score = second / (best + second + 1e-9)
+        return float(np.clip(score, 0.0, 1.0))
 
     def get_model_info(self) -> dict:
         """Return model metadata."""

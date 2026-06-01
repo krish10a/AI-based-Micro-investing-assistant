@@ -35,8 +35,8 @@ class MLService:
                 features, savings, income
             )
 
-            # Get confidence
-            confidence = self.assistant.confidence(features)
+            # Get cluster separation score (heuristic, not calibrated probability)
+            separation_score = self.assistant.cluster_separation_score(features)
 
             # Determine risk level with structured data
             if segment_override is not None and segment_override == min(
@@ -56,7 +56,8 @@ class MLService:
                 "suggested_monthly_investment": rec["suggested_monthly_investment"],
                 "investment_appetite": rec["investment_appetite"],
                 "reason_codes": rec["reason_codes"],
-                "confidence": round(confidence, 3),
+                "confidence": round(separation_score, 3),  # Kept as "confidence" for API compatibility
+                "cluster_separation_score": round(separation_score, 3),  # New field with accurate name
                 "risk_level": risk_level,
                 "financial_summary": {
                     "income": income,
